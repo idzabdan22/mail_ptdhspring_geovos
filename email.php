@@ -1,57 +1,43 @@
 <?php
 
-require 'PHPMailer-master/src/Exception.php';
-require 'PHPMailer-master/src/PHPMailer.php';
-require 'PHPMailer-master/src/SMTP.php';
+require_once 'PHPMailer-master/src/Exception.php';
+require_once 'PHPMailer-master/src/PHPMailer.php';
+require_once 'PHPMailer-master/src/SMTP.php';
+require_once 'Util/Request.php';
+require_once 'Util/Util.php';
+
+include 'config_alert.php';
 
 use PHPMailer\PHPMailer\PHPMailer;
 use PHPMailer\PHPMailer\SMTP;
 use PHPMailer\PHPMailer\Exception;
 
+$ut = new Util();
+$email_type = 'Hourly Sensor Data';
+$mail_log = 'mailstatus.log';
+$request_log = 'apierror.log';
+
 $url = "https://app.argatech.com/api/sensors";
-
-$curl = curl_init($url);
-curl_setopt($curl, CURLOPT_URL, $url);
-curl_setopt($curl, CURLOPT_RETURNTRANSFER, true);
-
 $headers = array(
    "Api-key: HZzJfm0H_qVQ4sJO4ZPVNDt0Idn4Ciyv8FEfNoT2M5CSApLpj34JLWqWwFU=",
    "Api-signature: r1zScrPLszZJ2YKO8_",
    "Content-Type: application/json",
+   "Api-version: 2"
 );
 
-curl_setopt($curl, CURLOPT_HTTPHEADER, $headers);
-//for debug only!
-curl_setopt($curl, CURLOPT_SSL_VERIFYHOST, false);
-curl_setopt($curl, CURLOPT_SSL_VERIFYPEER, false);
-
-function send_to_logFile($arr){
-    $data = implode(" - ", $arr);
-    //Add a newline onto the end.
-    $data .= PHP_EOL;
-    $pathToFile = 'mail.log';
-    file_put_contents($pathToFile, $data, FILE_APPEND);
+$req = new Request($url, $headers);
+if ($req->get_code_request() != "200 OK") {
+    $ut->send_to_log($request_log, array(
+        $ut->get_server_time('Asia/Jakarta'),
+        $url.' /GET',
+        $req->get_code_request()
+    ));
+} else {
+    $json = $req->get_response_data();
 }
 
-function get_time_server($dt){
-    $timezone = 'Asia/Jakarta';
-    date_default_timezone_set($timezone);
-    $time_stamp = date('m/d/Y h:i:s A', time());
-    return $time_stamp;
-}
-
-$log_data = array();
-$json = curl_exec($curl);
-$status_req = 0;
-(!empty($json)) ? $status_req = 200 : $status_req = 400;
-curl_close($curl);
 $data = json_decode($json);
-$timezone = 'Asia/Makassar';
-date_default_timezone_set($timezone);
-$time_stamp = date('m/d/Y h:i:s A', time());
-array_push($log_data, get_time_server($log_data));
-array_push($log_data, $url);
-array_push($log_data, $_SERVER["REQUEST_METHOD"]."/$status_req");
+$time = $ut->get_server_time('Asia/Makassar');
 
 $info = "<table style=\"width: 100%; text-align: center; border: 1px solid black; table-layout: fixed; border-collapse: collapse\">
             <tr >
@@ -62,7 +48,7 @@ $info = "<table style=\"width: 100%; text-align: center; border: 1px solid black
             <tr >
                 <th colspan = \"2\", 
                 style=\"background-color: #ff2a15;
-                color: #ffffff\">$time_stamp (WITA)</th>
+                color: #ffffff\">$time (WITA)</th>
             </tr>
             <tr >
                 <th style=\"border: 1px solid black; 
@@ -72,7 +58,7 @@ $info = "<table style=\"width: 100%; text-align: center; border: 1px solid black
                 background-color: #999999;
                 color: #ffffff\">Data</th>
             </tr>";
-$temp = "";
+
 $satuan = array (" ","mg/L","m3/H","mm","°C","cm/s");
 $index = 0;
 foreach($data as $item) { 
@@ -80,17 +66,15 @@ foreach($data as $item) {
         $index++;
         continue;
     }
-    $info .= "<tr><td style=\"border: 1px solid black\"><b>$item->name</b></td>";
-    $temp = $item->data[0]." ".$satuan[$index];
+    $info .= "<tr><td style=\"border :1px solid black\"><b>$item->name</b></td>";
+    $temp = $item->data[0]->value." ".$satuan[$index];
     $info .= "<td style=\"border: 1px solid black\"><b>$temp</b></td></tr>";
     $index++;
 }
 $info .= "</table>";
 
 $mail = new PHPMailer(true);
-
 try {
-    //Server settings
     $mail->SMTPDebug = SMTP::DEBUG_SERVER;                      //Enable verbose debug output
     $mail->isSMTP();                                            //Send using SMTP
     $mail->Host       = gethostbyname('mail.intank.id');                     //Set the SMTP server to send through
@@ -105,37 +89,25 @@ try {
         'verify_peer_name' => false, //false
         'allow_self_signed' => true //true
         )
-    );                                   //TCP port to connect to; use 587 if you have set `SMTPSecure = PHPMailer::ENCRYPTION_STARTTLS`
+    );                                   
 
-    //Recipients
     $mail->setFrom('notifications@intank.id', 'Tsel Geovos');
-    // $mail->addAddress('abdan.idza2345@gmail.com');
-    // $mail->addAddress('danang.sulthoni@gmail.com'); 
-    $mail->addAddress('fajrin.lathif@ptdh.co.id');
-    $mail->addAddress('ali.impron@ptdh.co.id');  
-    $mail->addAddress('danang_sulthoni@telkomsel.co.id');   
-    $mail->addAddress('ridwanssyh@gmail.com');  
-    
-    // $mail->addAddress('ellen@example.com');               //Name is optional
-    // $mail->addReplyTo('info@example.com', 'Information');
-    // $mail->addCC('cc@example.com');
+    foreach($email as $en){
+        $mail->addAddress($en);
+    }
     $mail->addBCC('abdan.idza2345@gmail.com');
 
-    //Attachments
-    // $mail->addAttachment('/var/tmp/file.tar.gz');         //Add attachments
-    // $mail->addAttachment('/tmp/image.jpg', 'new.jpg');    //Optional name     $mail->addAddress('ridwanssyh@gmail.com');  
-
-    //Content
     $mail->isHTML(true);                                  //Set email format to HTML
-    $mail->Subject = 'Hourly Sensor Data';
-    $mail->Body    = $info;
+    $mail->Subject = $email_type;
+    $mail->msgHTML($info);
     $mail->send();
-    array_push($log_data, "Email Was Sent Successfully");
 } catch (Exception $e) {
-    array_push($log_data, $mail->ErrorInfo);
+    $st = $mail->ErrorInfo;
+    $ut->send_to_log($mail_log, array(
+        $ut->get_server_time('Asia/Jakarta'),
+        $st
+    ));
 }
-
-send_to_logFile($log_data);
 
 ?>
 
